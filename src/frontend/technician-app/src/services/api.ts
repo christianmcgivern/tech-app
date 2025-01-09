@@ -76,6 +76,28 @@ interface ManualNotification {
   priority: 'high' | 'normal' | 'low';
 }
 
+export type WorkflowState = 
+  | 'CLOCKED_IN'
+  | 'TRAVELING_TO_FIRST_JOB'
+  | 'AT_JOBSITE'
+  | 'WORKING_ON_JOB'
+  | 'JOB_COMPLETED'
+  | 'TRAVELING_TO_NEXT_JOB'
+  | 'TRAVELING_TO_OFFICE'
+  | 'DAY_COMPLETED';
+
+export interface ClockRecord {
+    id: number;
+    technician_id: number;
+    truck_id: number;
+    clock_in_time: string;
+    clock_out_time: string | null;
+    workflow_state: WorkflowState;
+    current_work_order_id: number | null;
+    next_work_order_id: number | null;
+    is_locked: boolean;
+}
+
 export const api = {
   // Get all active technicians
   getActiveTechnicians: async (): Promise<Technician[]> => {
@@ -154,6 +176,39 @@ export const api = {
 
   getTechnicianStatus: async (technicianId: string) => {
     const response = await axios.get(`${API_URL}/technicians/${technicianId}/status`);
+    return response.data;
+  },
+
+  // Start job timing
+  startJobTiming: async (orderId: number, technicianId: string) => {
+    const response = await axios.post(`${API_URL}/work-orders/${orderId}/timing/start`, {
+      technician_id: technicianId
+    });
+    return response.data;
+  },
+
+  // End job timing
+  endJobTiming: async (orderId: number, technicianId: string, notes?: string) => {
+    const response = await axios.post(`${API_URL}/work-orders/${orderId}/timing/end`, {
+      technician_id: technicianId,
+      notes: notes
+    });
+    return response.data;
+  },
+
+  // Update workflow state
+  updateWorkflowState: async (technicianId: string, state: WorkflowState, currentWorkOrderId?: number, nextWorkOrderId?: number) => {
+    const response = await axios.patch(`${API_URL}/technicians/${technicianId}/workflow-state`, {
+      state,
+      current_work_order_id: currentWorkOrderId,
+      next_work_order_id: nextWorkOrderId
+    });
+    return response.data;
+  },
+
+  // Get current workflow state
+  getCurrentWorkflowState: async (technicianId: string): Promise<ClockRecord> => {
+    const response = await axios.get(`${API_URL}/technicians/${technicianId}/current-clock-record`);
     return response.data;
   },
 }; 

@@ -5,7 +5,7 @@ from psycopg2.extras import RealDictCursor
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 import traceback
 import logging
@@ -31,6 +31,12 @@ logger.info("Database parameters: %s", {k: v for k, v in db_params.items() if k 
 
 # Global connection pool
 conn_pool = None
+
+# New models for workflow state
+class WorkflowStateUpdate(BaseModel):
+    state: str
+    current_work_order_id: Optional[int] = None
+    next_work_order_id: Optional[int] = None
 
 def get_db_connection():
     global conn_pool
@@ -197,11 +203,13 @@ async def clock_out_technician(technician_id: int):
         # Find and update the active clock-in record
         cur.execute("""
             UPDATE technician_clock_records
-            SET clock_out_time = NOW()
+            SET clock_out_time = NOW(),
+                is_locked = TRUE,
+                workflow_state = 'DAY_COMPLETED'::technician_workflow_state
             WHERE technician_id = %s 
             AND clock_out_time IS NULL
             AND clock_in_time::date = CURRENT_DATE
-            RETURNING id, clock_in_time, clock_out_time
+            RETURNING id, clock_in_time, clock_out_time, workflow_state
         """, (technician_id,))
         
         record = cur.fetchone()
@@ -217,6 +225,7 @@ async def clock_out_technician(technician_id: int):
             "technician_id": technician_id,
             "clock_in_time": record['clock_in_time'],
             "clock_out_time": record['clock_out_time'],
+            "workflow_state": record['workflow_state'],
             "message": "Successfully clocked out"
         }
     except Exception as e:
@@ -840,6 +849,61 @@ async def get_technician_status(technician_id: str):
     except Exception as e:
         print(f"Error fetching technician status: {e}")
         raise HTTPException(status_code=500, detail=f"Error fetching technician status: {str(e)}")
+    finally:
+        conn.close()
+
+@app.patch("/api/technicians/{technician_id}/workflow-state")
+async def update_workflow_state(technician_id: int, state_update: WorkflowStateUpdate):
+    """Update the workflow state for a technician's current clock-in record"""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        
+        # Verify the technician exists and is active
+        cur.execute("SELECT id FROM technicians WHERE id = %s AND active = true", (technician_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Technician not found or inactive")
+        
+        # Only update non-locked records from today
+        cur.execute("""
+            UPDATE technician_clock_records
+            SET workflow_state = %s::technician_workflow_state,
+                current_work_order_id = %s,
+                next_work_order_id = %s
+            WHERE technician_id = %s 
+            AND clock_in_time::date = CURRENT_DATE 
+            AND clock_out_time IS NULL
+            AND NOT is_locked
+            RETURNING id, workflow_state, current_work_order_id, next_work_order_id
+        """, (
+            state_update.state,
+            state_update.current_work_order_id,
+            state_update.next_work_order_id,
+            technician_id
+        ))
+        
+        updated = cur.fetchone()
+        if not updated:
+            raise HTTPException(
+                status_code=400,
+                detail="No active clock record found or record is locked"
+            )
+        
+        conn.commit()
+        return {
+            "id": updated['id'],
+            "workflow_state": updated['workflow_state'],
+            "current_work_order_id": updated['current_work_order_id'],
+            "next_work_order_id": updated['next_work_order_id'],
+            "message": "Workflow state updated successfully"
+        }
+    except Exception as e:
+        conn.rollback()
+        print(f"Error updating workflow state: {e}")
+        print("Traceback:", traceback.format_exc())
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Error updating workflow state: {str(e)}")
     finally:
         conn.close()
 

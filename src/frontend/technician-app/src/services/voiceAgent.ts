@@ -41,6 +41,7 @@ interface VoiceAgentConfig {
 interface FunctionCall {
   name: string;
   arguments: string;
+  call_id?: string;
 }
 
 export class VoiceAgent extends EventEmitter {
@@ -52,10 +53,12 @@ export class VoiceAgent extends EventEmitter {
   private isActive: boolean = false;
   private functionCall: FunctionCall | null = null;
   private functionCallArgs: string = '';
+  private functionCallArgumentsBuffer: string = '';
   private baseUrl: string;
   private model: string;
   private technicianId: string | null = null;
   private technicianName: string | null = null;
+  private hasActiveResponse: boolean = false;
 
   constructor() {
     super();
@@ -64,6 +67,15 @@ export class VoiceAgent extends EventEmitter {
     this.model = 'gpt-4o-realtime-preview-2024-12-17';
     this.audioElement = document.createElement('audio');
     this.audioElement.autoplay = true;
+  }
+
+  private async ensureAudioContext() {
+    if (!this.audioContext || this.audioContext.state === 'closed') {
+      this.audioContext = new AudioContext();
+    }
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
   }
 
   public setTechnicianInfo(id: string, name: string) {
@@ -149,7 +161,18 @@ export class VoiceAgent extends EventEmitter {
       this.dataChannel.onopen = () => {
         console.log('Data channel opened');
         this.emit('datachannel_open');
-        this.initializeSession().catch(error => {
+        this.initializeSession().then(() => {
+          // Immediately request initial status after initialization
+          if (this.dataChannel && this.technicianId) {
+            console.log('Requesting initial technician status...');
+            this.dataChannel.send(JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["text", "audio"]
+              }
+            }));
+          }
+        }).catch(error => {
           console.error('Error initializing session:', error);
           this.cleanup();
           this.emit('error', error);
@@ -245,26 +268,75 @@ export class VoiceAgent extends EventEmitter {
         session: {
           input_audio_format: "pcm16",
           output_audio_format: "pcm16",
-          language: "es",
-          enable_voice_activity_detection: true,
-          enable_direct_audio_output: true,
-          instructions: `You are a voice assistant for technician ${this.technicianName} (ID: ${this.technicianId}) in the field. Follow this workflow:
-          1. First, use get_technician_status to get the current status of the technician, including their assigned truck and active work orders
-          2. Based on the status:
-             - If they have active work orders, summarize them and ask if they're ready to continue their work
-             - If they have no active work orders, use get_work_orders to fetch and summarize any pending work orders
-          3. For each work order:
-             - Ask if they're ready to travel to the jobsite
-             - When they confirm, use start_travel to record their departure
-             - When they say they've arrived, use end_travel to record their arrival
-             - Guide them through job completion by asking:
-               * Was everything completed?
-               * Are there any notes? (use update_work_order_notes)
-               * Was anything broken?
-               * Was extra material used? (use check_inventory and update_inventory if needed)
-               * Should the office be alerted? (use create_manual_notification if yes)
-          4. After each job, ask if they want to move to the next work order or end their day
-          5. When they say they're done, use check_inventory to review stock levels`,
+          modalities: ["text", "audio"],
+          voice: "alloy",
+          temperature: 0.8,
+          max_response_output_tokens: "inf",
+          instructions: `You are a voice assistant for technician ${this.technicianName} (ID: ${this.technicianId}) in the field. 
+          
+First, use get_technician_status to get their current workflow state and work orders.
+
+Based on their workflow_state:
+
+1. If CLOCKED_IN:
+   - Get their first work order using get_work_orders
+   - Ask if they're ready to travel to first job
+   - When confirmed:
+     * Use start_travel
+     * Update state to TRAVELING_TO_FIRST_JOB
+
+2. If TRAVELING_TO_FIRST_JOB or TRAVELING_TO_NEXT_JOB:
+   - Check current_work_order_id to know which job they're traveling to
+   - When they say "I've arrived":
+     * Use end_travel
+     * Update state to AT_JOBSITE
+
+3. If AT_JOBSITE:
+   - Ask if they're ready to start work
+   - When confirmed:
+     * Use start_job
+     * Update state to WORKING_ON_JOB
+
+4. If WORKING_ON_JOB:
+   - If they indicate job is complete:
+     * Use end_job
+     * Update state to JOB_COMPLETED
+     * Guide them through completion questions:
+       - Was everything completed?
+       - Are there any notes? (use update_work_order_notes)
+       - Was anything broken?
+       - Was extra material used? (use check_inventory and update_inventory if needed)
+       - Should the office be alerted? (use create_manual_notification if yes)
+
+5. If JOB_COMPLETED:
+   - Check if there are more work orders (next_work_order_id)
+   - If yes:
+     * Update state to TRAVELING_TO_NEXT_JOB
+     * Update current_work_order_id to next_work_order_id
+     * Get new next_work_order_id
+   - If no:
+     * Ask if they're ready to return to office
+     * Update state to TRAVELING_TO_OFFICE
+
+6. If TRAVELING_TO_OFFICE:
+   - When they arrive, ask if they're ready to end their day
+   - If yes:
+     * Update state to DAY_COMPLETED
+     * Trigger clock-out
+
+Always maintain awareness of:
+- current_work_order_id: The job they're currently traveling to or working on
+- next_work_order_id: The next job in their queue
+
+For any state transition:
+1. First call the appropriate function (start_travel, end_travel, start_job, end_job)
+2. Then update the workflow state using updateWorkflowState
+3. Confirm the state change was successful before proceeding
+
+If the connection is lost or browser is closed, when reconnecting:
+1. Get the current state using get_technician_status
+2. Resume from that exact point in the workflow
+3. Provide a brief reminder of what they were doing`,
           tools: tools
         }
       };
@@ -276,7 +348,7 @@ export class VoiceAgent extends EventEmitter {
     }
   }
 
-  private handleWebSocketMessage(event: MessageEvent) {
+  private async handleWebSocketMessage(event: MessageEvent) {
     try {
       const message = JSON.parse(event.data);
       console.log('Received message:', message.type);
@@ -289,6 +361,11 @@ export class VoiceAgent extends EventEmitter {
           console.log('Session updated successfully');
           break;
         case 'error':
+          if (message.error?.message?.includes('already has an active response')) {
+            console.log('Ignoring duplicate response request');
+            // Don't set hasActiveResponse here, as it might be a stale request
+            break;
+          }
           console.error('Server error:', message.error?.message || 'Unknown error');
           this.emit('error', new Error(message.error?.message || 'Unknown error'));
           break;
@@ -302,40 +379,65 @@ export class VoiceAgent extends EventEmitter {
           break;
         case 'input_audio_buffer.committed':
           console.log('Audio buffer committed');
-          break;
-        case 'conversation.item.created':
-          if (message.conversation_item?.type === 'function_call') {
-            console.log('Function call received:', message.conversation_item);
-            this.functionCall = {
-              name: message.conversation_item.function_call.name,
-              arguments: message.conversation_item.function_call.arguments
-            };
-            this.handleFunctionCall();
-          } else {
-            console.log('Conversation item created:', message.conversation_item);
+          if (this.dataChannel && !this.hasActiveResponse) {
+            console.log('Requesting response after audio commit');
+            this.hasActiveResponse = true;
+            this.dataChannel.send(JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["text", "audio"]
+              }
+            }));
           }
           break;
         case 'response.created':
-          console.log('Response created');
+          console.log('Full response:', message.response);
+          console.log('Response created with ID:', message.response?.id || 'unknown');
+          this.hasActiveResponse = true;
+          break;
+        case 'response.function_call.started':
+          this.functionCallArgumentsBuffer = '';
+          break;
+        case 'response.function_call_arguments.delta':
+          this.functionCallArgumentsBuffer += message.delta;
+          break;
+        case 'response.function_call_arguments.done':
+          console.log('Function call arguments completed:', message.name, this.functionCallArgumentsBuffer);
+          this.functionCall = {
+            name: message.name,
+            arguments: this.functionCallArgumentsBuffer,
+            call_id: message.call_id
+          };
+          this.functionCallArgs = this.functionCallArgumentsBuffer;
+          this.functionCallArgumentsBuffer = '';
+          await this.handleFunctionCall();
           break;
         case 'response.output_item.added':
           if (message.output_item?.content) {
+            console.log('Response output item added with content types:', 
+              message.output_item.content.map((c: any) => c.type).join(', '));
             this.handleResponseContent(message.output_item.content);
           }
           break;
-        case 'response.content_part.added':
-          if (message.content_part?.content) {
-            this.handleResponseContent([message.content_part.content]);
-          }
-          break;
-        case 'response.audio_transcript.delta':
-          if (message.delta?.text) {
-            console.log('Audio transcript delta:', message.delta.text);
-            this.emit('transcript_delta', message.delta.text);
-          }
-          break;
         case 'response.done':
-          console.log('Response completed');
+          console.log('Response completed. Full message:', JSON.stringify(message));
+          
+          // Handle different response completion scenarios
+          if (message.response?.status === 'cancelled' && 
+              message.response?.status_details?.reason === 'turn_detected') {
+            // Turn detected, just reset state
+            this.hasActiveResponse = false;
+          } else if (message.response?.status === 'failed' && 
+                    message.response?.status_details?.error?.code === 'rate_limit_exceeded') {
+            // Rate limit hit, wait before resetting
+            setTimeout(() => {
+              this.hasActiveResponse = false;
+            }, 5000); // Wait 5 seconds before allowing new responses
+          } else {
+            // Normal completion
+            this.hasActiveResponse = false;
+          }
+          
           this.emit('response_done');
           break;
         default:
@@ -381,13 +483,15 @@ export class VoiceAgent extends EventEmitter {
     try {
       const args = this.functionCallArgs ? JSON.parse(this.functionCallArgs) : {};
       
-      // Type check the function name
       if (!(functionName in functionMap)) {
         throw new Error(`Unknown function: ${functionName}`);
       }
 
       let result;
       switch (functionName) {
+        case 'get_technician_status':
+          result = await functionMap[functionName](args.technician_id);
+          break;
         case 'get_work_orders':
           result = await functionMap[functionName](args.technician_id);
           break;
@@ -409,38 +513,42 @@ export class VoiceAgent extends EventEmitter {
         case 'create_manual_notification':
           result = await functionMap[functionName](args);
           break;
+        case 'start_job':
+          result = await functionMap[functionName](args.work_order_id, args.technician_id);
+          break;
+        case 'end_job':
+          result = await functionMap[functionName](args.work_order_id, args.technician_id, args.notes);
+          break;
         default:
           throw new Error(`Unknown function: ${functionName}`);
       }
 
+      console.log(`Function ${functionName} returned result:`, result);
+
       // Send function output back to the assistant
-      this.dataChannel.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "function_call_output",
-          role: "system",
-          output: JSON.stringify(result)
-        }
-      }));
-
-      // Request a new response
-      this.dataChannel.send(JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["text", "audio"]
-        }
-      }));
-
-    } catch (error) {
-      console.error(`Error executing function ${functionName}:`, error);
-      
-      if (this.dataChannel) {
-        // Send error back to the assistant
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
         this.dataChannel.send(JSON.stringify({
           type: "conversation.item.create",
           item: {
             type: "function_call_output",
-            role: "system",
+            call_id: this.functionCall.call_id,
+            output: JSON.stringify(result)
+          }
+        }));
+
+        // Let the current response complete before requesting a new one
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+    } catch (error) {
+      console.error(`Error executing function ${functionName}:`, error);
+      
+      if (this.dataChannel && this.dataChannel.readyState === 'open') {
+        this.dataChannel.send(JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: this.functionCall.call_id,
             output: JSON.stringify({ 
               error: `Error executing ${functionName}: ${error instanceof Error ? error.message : 'Unknown error'}` 
             })
@@ -452,20 +560,16 @@ export class VoiceAgent extends EventEmitter {
     // Reset function call state
     this.functionCall = null;
     this.functionCallArgs = "";
+    this.functionCallArgumentsBuffer = "";
   }
 
   private async playAudioDelta(base64Audio: string) {
-    if (!this.audioContext) {
-      console.error('No audio context available');
-      return;
-    }
-
     try {
-      // Resume audio context if needed
-      if (this.audioContext.state === 'suspended') {
-        console.log('Resuming audio context before playback');
-        await this.audioContext.resume();
-        console.log('Audio context resumed:', this.audioContext.state);
+      await this.ensureAudioContext();
+      
+      if (!this.audioContext) {
+        console.error('No audio context available');
+        return;
       }
 
       // Decode base64 to array buffer
@@ -515,6 +619,7 @@ export class VoiceAgent extends EventEmitter {
     this.peerConnection = null;
     this.audioContext = null;
     this.isActive = false;
+    this.hasActiveResponse = false;
   }
 
   public disconnect() {

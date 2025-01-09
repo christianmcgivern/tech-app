@@ -197,3 +197,184 @@ OPENAI_API_KEY=your-api-key
 ```bash
 cd src/frontend/technician-app && npm run dev
 ```
+
+### Voice Agent Workflow Management
+
+The voice agent now includes comprehensive workflow state management:
+
+```typescript
+// Session initialization with workflow instructions
+private async initializeSession() {
+  const sessionConfig = {
+    type: "session.update",
+    session: {
+      input_audio_format: "pcm16",
+      output_audio_format: "pcm16",
+      instructions: `You are a voice assistant for technician ${this.technicianName} (ID: ${this.technicianId}) in the field. 
+      
+First, use get_technician_status to get their current workflow state and work orders.
+
+Based on their workflow_state:
+
+1. If CLOCKED_IN:
+   - Get their first work order using get_work_orders
+   - Ask if they're ready to travel to first job
+   - When confirmed:
+     * Use start_travel
+     * Update state to TRAVELING_TO_FIRST_JOB
+
+2. If TRAVELING_TO_FIRST_JOB or TRAVELING_TO_NEXT_JOB:
+   - Check current_work_order_id to know which job they're traveling to
+   - When they say "I've arrived":
+     * Use end_travel
+     * Update state to AT_JOBSITE
+
+3. If AT_JOBSITE:
+   - Ask if they're ready to start work
+   - When confirmed:
+     * Use start_job
+     * Update state to WORKING_ON_JOB
+
+4. If WORKING_ON_JOB:
+   - If they indicate job is complete:
+     * Use end_job
+     * Update state to JOB_COMPLETED
+     * Guide them through completion questions:
+       - Was everything completed?
+       - Are there any notes? (use update_work_order_notes)
+       - Was anything broken?
+       - Was extra material used? (use check_inventory and update_inventory if needed)
+       - Should the office be alerted? (use create_manual_notification if yes)
+
+5. If JOB_COMPLETED:
+   - Check if there are more work orders (next_work_order_id)
+   - If yes:
+     * Update state to TRAVELING_TO_NEXT_JOB
+     * Update current_work_order_id to next_work_order_id
+     * Get new next_work_order_id
+   - If no:
+     * Ask if they're ready to return to office
+     * Update state to TRAVELING_TO_OFFICE
+
+6. If TRAVELING_TO_OFFICE:
+   - When they arrive, ask if they're ready to end their day
+   - If yes:
+     * Update state to DAY_COMPLETED
+     * Trigger clock-out
+
+Always maintain awareness of:
+- current_work_order_id: The job they're currently traveling to or working on
+- next_work_order_id: The next job in their queue
+
+For any state transition:
+1. First call the appropriate function (start_travel, end_travel, start_job, end_job)
+2. Then update the workflow state using updateWorkflowState
+3. Confirm the state change was successful before proceeding`,
+      tools: tools
+    }
+  };
+  this.dataChannel.send(JSON.stringify(sessionConfig));
+}
+
+// Function call handling with workflow state updates
+private async handleFunctionCall() {
+  if (!this.functionCall || !this.dataChannel) return;
+
+  const functionName = this.functionCall.name;
+  const args = JSON.parse(this.functionCallArgs);
+  
+  try {
+    let result;
+    switch (functionName) {
+      case 'start_travel':
+        result = await functionMap[functionName](args.work_order_id, args.technician_id);
+        break;
+      case 'end_travel':
+        result = await functionMap[functionName](args.work_order_id, args.technician_id);
+        break;
+      case 'start_job':
+        result = await functionMap[functionName](args.work_order_id, args.technician_id);
+        break;
+      case 'end_job':
+        result = await functionMap[functionName](args.work_order_id, args.technician_id, args.notes);
+        break;
+      case 'update_workflow_state':
+        result = await functionMap[functionName](
+          args.technician_id,
+          args.state,
+          args.current_work_order_id,
+          args.next_work_order_id
+        );
+        break;
+      // ... other function cases
+    }
+
+    // Send function output back to assistant
+    this.dataChannel.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: this.functionCall.call_id,
+        output: JSON.stringify(result)
+      }
+    }));
+  } catch (error) {
+    console.error(`Error executing function ${functionName}:`, error);
+  }
+}
+
+### State Recovery on Reconnection
+
+The voice agent implements robust state recovery when reconnecting:
+
+```typescript
+public async connect() {
+  try {
+    await this.setupWebRTC();
+    
+    // Get current technician status and workflow state
+    const status = await api.getTechnicianStatus(this.technicianId);
+    
+    // Initialize session with current state
+    await this.initializeSession();
+    
+    // Resume from last known state
+    if (status.workflow_state) {
+      this.dataChannel.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "text",
+          text: `Resuming from state: ${status.workflow_state}. Current work order: ${status.current_work_order_id}`
+        }
+      }));
+    }
+  } catch (error) {
+    console.error('Error connecting:', error);
+    this.cleanup();
+    throw error;
+  }
+}
+
+### Error Handling and State Validation
+
+The voice agent includes comprehensive error handling for state transitions:
+
+```typescript
+private async validateStateTransition(
+  currentState: WorkflowState,
+  newState: WorkflowState
+): Promise<boolean> {
+  const validTransitions: { [key in WorkflowState]: WorkflowState[] } = {
+    'CLOCKED_IN': ['TRAVELING_TO_FIRST_JOB'],
+    'TRAVELING_TO_FIRST_JOB': ['AT_JOBSITE'],
+    'AT_JOBSITE': ['WORKING_ON_JOB'],
+    'WORKING_ON_JOB': ['JOB_COMPLETED'],
+    'JOB_COMPLETED': ['TRAVELING_TO_NEXT_JOB', 'TRAVELING_TO_OFFICE'],
+    'TRAVELING_TO_NEXT_JOB': ['AT_JOBSITE'],
+    'TRAVELING_TO_OFFICE': ['DAY_COMPLETED'],
+    'DAY_COMPLETED': []
+  };
+
+  return validTransitions[currentState].includes(newState);
+}
+```

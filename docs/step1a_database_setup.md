@@ -138,6 +138,18 @@ CREATE TABLE truck_inventory (
 ### Tracking and History Tables
 
 ```sql
+-- Technician Workflow State Enum
+CREATE TYPE technician_workflow_state AS ENUM (
+    'CLOCKED_IN',
+    'TRAVELING_TO_FIRST_JOB',
+    'AT_JOBSITE',
+    'WORKING_ON_JOB',
+    'JOB_COMPLETED',
+    'TRAVELING_TO_NEXT_JOB',
+    'TRAVELING_TO_OFFICE',
+    'DAY_COMPLETED'
+);
+
 -- Technician Clock Records
 CREATE TABLE technician_clock_records (
     id SERIAL PRIMARY KEY,
@@ -145,6 +157,10 @@ CREATE TABLE technician_clock_records (
     truck_id INTEGER REFERENCES trucks(id),
     clock_in_time TIMESTAMP,
     clock_out_time TIMESTAMP,
+    workflow_state technician_workflow_state DEFAULT 'CLOCKED_IN',
+    current_work_order_id INTEGER REFERENCES work_orders(id),
+    next_work_order_id INTEGER REFERENCES work_orders(id),
+    is_locked BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

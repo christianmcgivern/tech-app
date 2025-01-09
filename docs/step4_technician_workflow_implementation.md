@@ -28,7 +28,143 @@ class TechnicianStatus(Enum):
     ON_JOB = "on_job"
     ON_BREAK = "on_break"
     OFF_DUTY = "off_duty"
+
+class WorkflowState(Enum):
+    """
+    Workflow State Transitions:
+    CLOCKED_IN -> TRAVELING_TO_FIRST_JOB -> AT_JOBSITE -> WORKING_ON_JOB -> JOB_COMPLETED
+                                                                         -> TRAVELING_TO_NEXT_JOB
+                                                                         -> TRAVELING_TO_OFFICE
+                                                                         -> DAY_COMPLETED
+    """
+    CLOCKED_IN = "CLOCKED_IN"
+    TRAVELING_TO_FIRST_JOB = "TRAVELING_TO_FIRST_JOB"
+    AT_JOBSITE = "AT_JOBSITE"
+    WORKING_ON_JOB = "WORKING_ON_JOB"
+    JOB_COMPLETED = "JOB_COMPLETED"
+    TRAVELING_TO_NEXT_JOB = "TRAVELING_TO_NEXT_JOB"
+    TRAVELING_TO_OFFICE = "TRAVELING_TO_OFFICE"
+    DAY_COMPLETED = "DAY_COMPLETED"
 ```
+
+### Workflow State Management
+```python
+@app.patch("/api/technicians/{technician_id}/workflow-state")
+async def update_workflow_state(technician_id: int, state_update: WorkflowStateUpdate):
+    """Update the workflow state for a technician's current clock-in record"""
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        
+        # Verify the technician exists and is active
+        cur.execute("SELECT id FROM technicians WHERE id = %s AND active = true", (technician_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Technician not found or inactive")
+        
+        # Only update non-locked records from today
+        cur.execute("""
+            UPDATE technician_clock_records
+            SET workflow_state = %s::technician_workflow_state,
+                current_work_order_id = %s,
+                next_work_order_id = %s
+            WHERE technician_id = %s 
+            AND clock_in_time::date = CURRENT_DATE 
+            AND clock_out_time IS NULL
+            AND NOT is_locked
+            RETURNING id, workflow_state, current_work_order_id, next_work_order_id
+        """, (
+            state_update.state,
+            state_update.current_work_order_id,
+            state_update.next_work_order_id,
+            technician_id
+        ))
+        
+        updated = cur.fetchone()
+        if not updated:
+            raise HTTPException(
+                status_code=400,
+                detail="No active clock record found or record is locked"
+            )
+        
+        return {
+            "id": updated['id'],
+            "workflow_state": updated['workflow_state'],
+            "current_work_order_id": updated['current_work_order_id'],
+            "next_work_order_id": updated['next_work_order_id'],
+            "message": "Workflow state updated successfully"
+        }
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating workflow state: {str(e)}")
+    finally:
+        conn.close()
+```
+
+### Frontend Integration
+```typescript
+export type WorkflowState = 
+  | 'CLOCKED_IN'
+  | 'TRAVELING_TO_FIRST_JOB'
+  | 'AT_JOBSITE'
+  | 'WORKING_ON_JOB'
+  | 'JOB_COMPLETED'
+  | 'TRAVELING_TO_NEXT_JOB'
+  | 'TRAVELING_TO_OFFICE'
+  | 'DAY_COMPLETED';
+
+export interface ClockRecord {
+    id: number;
+    technician_id: number;
+    truck_id: number;
+    clock_in_time: string;
+    clock_out_time: string | null;
+    workflow_state: WorkflowState;
+    current_work_order_id: number | null;
+    next_work_order_id: number | null;
+    is_locked: boolean;
+}
+
+// API function to update workflow state
+async updateWorkflowState(
+    technicianId: string,
+    state: WorkflowState,
+    currentWorkOrderId?: number,
+    nextWorkOrderId?: number
+) {
+    const response = await axios.patch(
+        `${API_URL}/technicians/${technicianId}/workflow-state`,
+        {
+            state,
+            current_work_order_id: currentWorkOrderId,
+            next_work_order_id: nextWorkOrderId
+        }
+    );
+    return response.data;
+}
+```
+
+### Voice Agent Integration
+The voice agent has been updated to manage workflow states through the following steps:
+
+1. **State Initialization**
+   - Check current state on connection
+   - Resume workflow from last known state
+   - Maintain state across disconnections
+
+2. **State Transitions**
+   - Validate state changes
+   - Update database records
+   - Notify relevant systems
+
+3. **Work Order Tracking**
+   - Track current work order
+   - Manage work order queue
+   - Handle completion states
+
+4. **Error Handling**
+   - Validate state transitions
+   - Handle invalid states
+   - Maintain data consistency
 
 ## Implementation Details
 
