@@ -1,0 +1,21 @@
+{
+  "websocket": {
+    "url": "wss://api.openai.com/v1/realtime",
+    "model": "gpt-4o-realtime-preview-2024-10-01",
+    "ping_interval": 30,
+    "ping_timeout": 10
+  },
+  "audio": {
+    "sample_rate": 24000,
+    "channels": 1,
+    "chunk_size": 1024
+  },
+  "logging": {
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "date_format": "%Y-%m-%d %H:%M:%S"
+  },
+  "technician": {
+    "max_active_orders": 5,
+    "location_update_interval": 300
+  }
+}

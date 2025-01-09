@@ -1,0 +1,20 @@
+                    List of relations
+ Schema |           Name           | Type  |    Owner     
+--------+--------------------------+-------+--------------
+ public | customer_history         | table | office_admin
+ public | customers                | table | office_admin
+ public | inventory_items          | table | office_admin
+ public | manual_notifications     | table | office_admin
+ public | notifications            | table | office_admin
+ public | technician_clock_records | table | office_admin
+ public | technicians              | table | office_admin
+ public | travel_logs              | table | office_admin
+ public | truck_inventory          | table | office_admin
+ public | trucks                   | table | office_admin
+ public | voice_agent_interactions | table | office_admin
+ public | voice_agent_sessions     | table | office_admin
+ public | work_order_history       | table | office_admin
+ public | work_order_notes         | table | office_admin
+ public | work_orders              | table | office_admin
+(15 rows)
+

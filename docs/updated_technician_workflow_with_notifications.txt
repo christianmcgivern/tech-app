@@ -1,0 +1,117 @@
+
+Technician Daily Workflow Logic
+
+1. Technician Login and Initialization
+
+Overview:
+- Present dropdown options for the technician to select their name and the assigned truck.
+- Action to start the day triggers clock-in and initializes AI interaction.
+
+Logic:
+def technician_login():
+    technician_name = select_from_dropdown("Technician Name")
+    truck_id = select_from_dropdown("Assigned Truck")
+    print("Start Day")
+
+    # Record clock-in time
+    clock_in_time = record_time_to_database(technician_name, truck_id)
+
+    # Initiate AI-Driven Interaction
+    ai_greet_technician(technician_name)
+
+
+2. Clock-In and AI Startup
+
+Logic:
+def ai_greet_technician(name):
+    greeting = f"Good Morning, {name}! Ready to start your day?"
+    technician_response = listen_for_response() # Implement based on STT
+
+    if technician_response.lower() == "yes":
+        work_order_summary(name)
+
+
+3. Work Order Summary
+
+Logic:
+def work_order_summary(technician_name):
+    pending_orders = get_pending_work_orders(technician_name)
+    query = "Would you like a summary of your pending work orders?"
+    technician_response = listen_for_response()
+
+    if technician_response.lower() == "yes":
+        provide_work_order_summary(pending_orders)
+    travel_to_first_job()
+
+
+4. Travel Tracking
+
+Logic:
+def travel_to_first_job():
+    readiness = listen_for_response("Are you ready to travel to the first jobsite?")
+    
+    if readiness.lower() == "yes":
+        start_travel = record_travel_start_time()
+
+        # Wait for technician arrival
+        arrival_confirmation = listen_for_response("I arrived")
+        record_travel_end_time()
+        
+        ai_resume_at_jobsite()
+
+
+5. Job Start and Completion
+
+Logic:
+def job_start_and_completion(database, work_order_id, notify_office):
+    start_job_time = record_job_start_time()
+    completion_confirmation = listen_for_response("End Job")
+
+    if completion_confirmation.lower() == "yes":
+        responses = {}
+        
+        questions = {
+            "Was everything completed?": "completion_status",
+            "Are there any notes?": "notes",
+            "Was anything broken?": "issues",
+            "Was extra material used?": "extra_material",
+            "Should the office be alerted?": "alert_office"
+        }
+        
+        for question, field in questions.items():
+            response = listen_for_response(question)
+            responses[field] = response
+            update_database_field(database, work_order_id, field, response)
+
+            # Trigger immediate notifications for select questions
+            if field in ["issues", "alert_office"] and response.lower() == "yes":
+                notify_office(f"Issue detected: {question}. Response: {response}")
+        
+        update_job_status_in_database(database, work_order_id, responses)
+
+def notify_office(message):
+    # Example implementation to send immediate notifications to office staff
+    print(f"Notification to Office: {message}")
+
+    # Implementation could involve sending an email, message, or app notification.
+
+def update_database_field(database, work_order_id, field, value):
+    # Example of updating a specific field in the database
+    query = f"UPDATE work_orders SET {field} = %s WHERE work_order_id = %s"
+    database.execute(query, (value, work_order_id))
+    print(f"Updated {field} with '{value}' for work order ID {work_order_id}")
+
+def update_job_status_in_database(database, work_order_id, responses):
+    # Additional update logic could go here, such as summarizing or logging the complete set of updates
+    print(f"Job work order {work_order_id} updated with responses: {responses}")
+
+
+6. End of Day Procedures
+
+Logic:
+def end_of_day():
+    all_jobs_completed = listen_for_response("End Day")
+    
+    if all_jobs_completed.lower() == "yes":
+        ai_check_inventory_stock()
+        record_clock_out_time()
