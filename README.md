@@ -1,144 +1,188 @@
-# AI-Powered Technician Workflow System
+# Technician Workflow Management System
 
-A real-time AI system for managing technician workflows using OpenAI's Realtime API.
+## Overview
+A comprehensive web-based platform for managing field technician workflows, featuring real-time voice interaction, work order management, and automated status tracking. The system consists of two main applications:
 
-## Features
+1. **Technician Mobile App**: A voice-enabled mobile interface for field technicians
+2. **Office Platform**: A management dashboard for office staff
 
-- Real-time AI interactions using WebSocket connections
-- Work order management with priority queuing
-- Location tracking and validation
-- Audio input/output handling
-- Comprehensive error handling
-- Performance monitoring and metrics collection
+## Key Features
 
-## Installation
+### Voice-Enabled Workflow Management
+- Real-time voice interaction using WebRTC
+- Natural language processing for hands-free operation
+- Automated workflow state tracking
+- Contextual responses based on current work status
+
+### Work Order Management
+- Real-time work order tracking
+- Automated status updates
+- Note taking and office notifications
+- Customer information management
+- Job timing and travel tracking
+
+### Inventory Management
+- Real-time truck inventory tracking
+- Automated inventory updates
+- Low stock notifications
+- Inventory transfer between trucks
+
+### Real-time Communication
+- Instant notifications between office and field
+- Status updates in real-time
+- Emergency alerts and priority messaging
+- Voice and text-based communication
+
+## Technical Stack
+
+### Frontend
+- React with TypeScript
+- Material-UI for technician app
+- Tailwind CSS for office platform
+- WebRTC for real-time voice communication
+- Axios for API communication
+
+### Backend
+- FastAPI (Python)
+- PostgreSQL database
+- WebSocket for real-time updates
+- JWT authentication
+- Real-time voice processing
+
+## Documentation
+Extensive documentation is available in the `docs` folder:
+- `api_reference.txt`: Complete API endpoint documentation
+- `realtime_api_documentation.txt`: Real-time API integration details
+- `updated_technician_workflow_with_notifications.txt`: Detailed workflow documentation
+- `step4_technician_workflow_implementation.md`: Step-by-step implementation guide
+- Additional technical specifications and guides
+
+## Getting Started
+
+### Prerequisites
+- Node.js (v16+)
+- Python (3.9+)
+- PostgreSQL (14+)
+- pnpm (recommended) or npm
+- OpenAI API key with access to real-time audio models
+
+### Installation
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone [repository-url]
 cd tech-app
 ```
 
-2. Create and activate a virtual environment:
+2. Install frontend dependencies:
 ```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or
-.\venv\Scripts\activate  # Windows
+cd src/frontend/technician-app
+pnpm install
+cd ../office-platform
+pnpm install
 ```
 
-3. Install dependencies:
+3. Install backend dependencies:
 ```bash
+cd ../../backend
 pip install -r requirements.txt
 ```
 
-4. Copy the example environment file and configure:
+4. Set up the database:
 ```bash
-cp config/.env.example .env
-# Edit .env with your settings
+# Create the database
+createdb tech_workflow_db
+
+# Run migrations
+python migrations.py
 ```
 
-## Configuration
-
-The system uses both environment variables and JSON configuration:
-
-1. Environment Variables (`.env`):
-- `OPENAI_API_KEY`: Your OpenAI API key
-- `LOG_LEVEL`: Logging level (default: INFO)
-
-2. JSON Configuration (`config/config.json`):
-- WebSocket settings
-- Audio configuration
-- Logging format
-- Technician parameters
-
-## Usage
-
-1. Start the application:
+5. Configure environment variables:
 ```bash
-python -m src.main
+# Copy the example env file
+cp .env.example .env
+
+# Edit .env and update the following required values:
+# - OPENAI_API_KEY: Your OpenAI API key
+# - DB_PASSWORD: Your secure database password
+# - JWT_SECRET: A secure random string for JWT signing
 ```
 
-2. Monitor the application:
+The `.env.example` file contains all necessary configuration with dummy values. Required changes are:
+- `OPENAI_API_KEY`: Your OpenAI API key with access to real-time audio models
+- `DB_PASSWORD`: A secure password for the PostgreSQL database
+- `JWT_SECRET`: A secure random string for JWT token signing
+- Other values can be left as defaults for local development
+
+### Security Notes
+- Never commit your `.env` file or API keys to version control
+- The `.gitignore` file is configured to exclude `.env` files
+- For production deployment, use secure environment variable management
+- Regularly rotate API keys and monitor usage
+- Use strong, unique passwords for database access
+- Generate a secure random string for JWT_SECRET in production
+
+### Running the Application
+
+#### Option 1: Using the Start Script
+The easiest way to start all servers is using the provided script:
 ```bash
-python -m src.utils.monitoring --summary
+./start-servers.sh
 ```
+This will start the backend server, technician app, and office platform simultaneously.
 
-## Testing
+#### Option 2: Manual Startup
+Alternatively, you can start each server individually:
 
-Run the test suite:
+1. Start the backend server:
 ```bash
-pytest
+cd src/backend
+uvicorn main:app --reload
 ```
 
-Run specific test categories:
+2. Start the technician app:
 ```bash
-pytest tests/core/  # Core functionality tests
-pytest tests/utils/  # Utility tests
-pytest -k "work_order"  # Work order specific tests
+cd src/frontend/technician-app
+pnpm dev
 ```
 
-### Test Coverage
-
-Generate coverage report:
+3. Start the office platform:
 ```bash
-pytest --cov=src tests/
+cd src/frontend/office-platform
+pnpm dev
 ```
 
-## Monitoring
+## Architecture
 
-The system includes comprehensive monitoring capabilities:
+### Database Schema
+- `technicians`: Technician information and status
+- `work_orders`: Work order details and assignments
+- `technician_clock_records`: Daily clock-in/out records with workflow states
+- `truck_inventory`: Real-time inventory tracking
+- `work_order_notes`: Communication and status notes
+- `manual_notifications`: Priority alerts and notifications
 
-1. API Metrics:
-- Call duration tracking
-- Error rate monitoring
-- Rate limit tracking
+### API Endpoints
+- `/api/technicians/*`: Technician management and status
+- `/api/work-orders/*`: Work order operations
+- `/api/inventory/*`: Inventory management
+- `/ws/*`: WebSocket endpoints for real-time updates
 
-2. Performance Monitoring:
-```python
-from src.utils.monitoring import MetricsCollector
-
-metrics = MetricsCollector()
-summary = metrics.get_api_metrics_summary(window_minutes=60)
-print(f"API Performance: {summary}")
-```
-
-3. Rate Limits:
-```python
-limits = metrics.get_rate_limit_status()
-print(f"Current Rate Limits: {limits}")
-```
-
-## Project Structure
-
-```
-src/
-├── core/           # Core functionality
-│   ├── websocket.py
-│   ├── audio.py
-│   └── work_order.py
-├── utils/          # Utility modules
-│   ├── config.py
-│   ├── logging.py
-│   └── monitoring.py
-└── main.py         # Application entry point
-
-tests/              # Test suite
-├── core/           # Core tests
-└── utils/          # Utility tests
-
-config/             # Configuration files
-└── config.json
-```
+### Voice Agent System
+- Real-time audio processing
+- Natural language understanding
+- Context-aware responses
+- Workflow state management
+- Function calling system
 
 ## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-[License information]
+## Acknowledgments
+- OpenAI for real-time voice processing
+- FastAPI team for the excellent framework
+- React team for the frontend framework
+- All contributors and testers
