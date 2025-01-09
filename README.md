@@ -1,188 +1,166 @@
-# Technician Workflow Management System
+# Tech Workflow Application
 
-## Overview
-A comprehensive web-based platform for managing field technician workflows, featuring real-time voice interaction, work order management, and automated status tracking. The system consists of two main applications:
+A full-stack application for managing technician workflows, inventory, and work orders with voice command capabilities.
 
-1. **Technician Mobile App**: A voice-enabled mobile interface for field technicians
-2. **Office Platform**: A management dashboard for office staff
+## Demo Access
 
-## Key Features
+After setup, you'll have access to:
 
-### Voice-Enabled Workflow Management
-- Real-time voice interaction using WebRTC
-- Natural language processing for hands-free operation
-- Automated workflow state tracking
-- Contextual responses based on current work status
+1. **Technician Mobile Interface**
+   - URL: http://localhost:5174
+   - Demo Accounts:
+     - Mike Johnson (ID: 1)
+     - Sarah Williams (ID: 2)
+     - David Chen (ID: 3)
+     - Alex Rodriguez (ID: 4)
+   - Features:
+     - Voice commands for hands-free operation
+     - Work order management
+     - Inventory tracking
+     - Status updates
 
-### Work Order Management
-- Real-time work order tracking
-- Automated status updates
-- Note taking and office notifications
-- Customer information management
-- Job timing and travel tracking
+2. **Office Management Dashboard**
+   - URL: http://localhost:5173
+   - Features:
+     - Real-time technician tracking
+     - Work order assignment
+     - Inventory management
+     - Analytics dashboard
 
-### Inventory Management
-- Real-time truck inventory tracking
-- Automated inventory updates
-- Low stock notifications
-- Inventory transfer between trucks
+## Demo Data
 
-### Real-time Communication
-- Instant notifications between office and field
-- Status updates in real-time
-- Emergency alerts and priority messaging
-- Voice and text-based communication
+The database comes pre-populated with demo data including:
+- 4 active technicians
+- 5 service trucks (including an office truck)
+- Sample work orders
+- Inventory items
+- Customer records
 
-## Technical Stack
+This demo data allows you to test all features immediately after setup.
 
-### Frontend
-- React with TypeScript
-- Material-UI for technician app
-- Tailwind CSS for office platform
-- WebRTC for real-time voice communication
-- Axios for API communication
+## Quick Start
 
-### Backend
-- FastAPI (Python)
-- PostgreSQL database
-- WebSocket for real-time updates
-- JWT authentication
-- Real-time voice processing
-
-## Documentation
-Extensive documentation is available in the `docs` folder:
-- `api_reference.txt`: Complete API endpoint documentation
-- `realtime_api_documentation.txt`: Real-time API integration details
-- `updated_technician_workflow_with_notifications.txt`: Detailed workflow documentation
-- `step4_technician_workflow_implementation.md`: Step-by-step implementation guide
-- Additional technical specifications and guides
-
-## Getting Started
-
-### Prerequisites
-- Node.js (v16+)
-- Python (3.9+)
-- PostgreSQL (14+)
-- pnpm (recommended) or npm
-- OpenAI API key with access to real-time audio models
-
-### Installation
-
-1. Clone the repository:
+1. **Clone the repository**
 ```bash
-git clone [repository-url]
+git clone <repository-url>
 cd tech-app
 ```
 
-2. Install frontend dependencies:
+2. **Set up the Backend**
 ```bash
-cd src/frontend/technician-app
-pnpm install
-cd ../office-platform
-pnpm install
-```
+# Create and activate Python virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# OR
+.\venv\Scripts\activate  # Windows
 
-3. Install backend dependencies:
-```bash
-cd ../../backend
-pip install -r requirements.txt
-```
-
-4. Set up the database:
-```bash
-# Create the database
-createdb tech_workflow_db
-
-# Run migrations
-python migrations.py
-```
-
-5. Configure environment variables:
-```bash
-# Copy the example env file
-cp .env.example .env
-
-# Edit .env and update the following required values:
-# - OPENAI_API_KEY: Your OpenAI API key
-# - DB_PASSWORD: Your secure database password
-# - JWT_SECRET: A secure random string for JWT signing
-```
-
-The `.env.example` file contains all necessary configuration with dummy values. Required changes are:
-- `OPENAI_API_KEY`: Your OpenAI API key with access to real-time audio models
-- `DB_PASSWORD`: A secure password for the PostgreSQL database
-- `JWT_SECRET`: A secure random string for JWT token signing
-- Other values can be left as defaults for local development
-
-### Security Notes
-- Never commit your `.env` file or API keys to version control
-- The `.gitignore` file is configured to exclude `.env` files
-- For production deployment, use secure environment variable management
-- Regularly rotate API keys and monitor usage
-- Use strong, unique passwords for database access
-- Generate a secure random string for JWT_SECRET in production
-
-### Running the Application
-
-#### Option 1: Using the Start Script
-The easiest way to start all servers is using the provided script:
-```bash
-./start-servers.sh
-```
-This will start the backend server, technician app, and office platform simultaneously.
-
-#### Option 2: Manual Startup
-Alternatively, you can start each server individually:
-
-1. Start the backend server:
-```bash
+# Install Python dependencies
 cd src/backend
-uvicorn main:app --reload
+pip install -r requirements.txt
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your database configuration (default values should work)
 ```
 
-2. Start the technician app:
+3. **Set up the Frontend**
 ```bash
+# Install Node.js dependencies
 cd src/frontend/technician-app
-pnpm dev
+npm install
+
+# Set up environment variables
+cp .env.example .env.local
+# Edit .env.local and add your OpenAI API key
 ```
 
-3. Start the office platform:
+4. **Set up the Database**
 ```bash
-cd src/frontend/office-platform
-pnpm dev
+# Create PostgreSQL database and tables
+cd src/db
+python setup_demo.py
 ```
 
-## Architecture
+5. **Start the Application**
+```bash
+# Start the backend server (in src/backend directory)
+python main.py
 
-### Database Schema
-- `technicians`: Technician information and status
-- `work_orders`: Work order details and assignments
-- `technician_clock_records`: Daily clock-in/out records with workflow states
-- `truck_inventory`: Real-time inventory tracking
-- `work_order_notes`: Communication and status notes
-- `manual_notifications`: Priority alerts and notifications
+# In a new terminal, start the frontend (in src/frontend/technician-app directory)
+npm run dev
+```
 
-### API Endpoints
-- `/api/technicians/*`: Technician management and status
-- `/api/work-orders/*`: Work order operations
-- `/api/inventory/*`: Inventory management
-- `/ws/*`: WebSocket endpoints for real-time updates
+The application should now be running at:
+- Frontend: http://localhost:5174
+- Backend API: http://localhost:8001/api
 
-### Voice Agent System
-- Real-time audio processing
-- Natural language understanding
-- Context-aware responses
-- Workflow state management
-- Function calling system
+## Required Environment Variables
+
+### Backend (.env)
+- Database configuration (default values provided)
+  - `DB_NAME=tech_workflow_db`
+  - `DB_USER=office_admin`
+  - `DB_PASSWORD=secure_password`
+  - `DB_HOST=localhost`
+  - `DB_PORT=5432`
+
+### Frontend (.env.local)
+- `VITE_OPENAI_API_KEY`: Your OpenAI API key (required for voice commands)
+
+## Features
+- Technician management and tracking
+- Work order processing
+- Inventory management
+- Voice command interface
+- Real-time updates
+- Dashboard analytics
+
+## Development
+
+### Project Structure
+```
+tech-app/
+├── src/
+│   ├── backend/          # FastAPI backend
+│   ├── frontend/         # React frontend
+│   │   └── technician-app/
+│   └── db/              # Database scripts
+├── docs/                # Documentation
+└── README.md
+```
+
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- PostgreSQL 12+
+- OpenAI API key
+
+## Troubleshooting
+
+1. **Port Already in Use**
+   ```bash
+   # Check what's using the port
+   lsof -i :3000  # or whatever port
+   # Kill the process
+   kill -9 <PID>
+   ```
+
+2. **Database Connection Issues**
+   - Verify PostgreSQL is running
+   - Check database credentials in .env
+   - Ensure database and tables are created
+
+3. **Voice Commands Not Working**
+   - Verify OpenAI API key is set correctly
+   - Check browser microphone permissions
+   - Ensure you're using a supported browser (Chrome recommended)
 
 ## Contributing
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-- OpenAI for real-time voice processing
-- FastAPI team for the excellent framework
-- React team for the frontend framework
-- All contributors and testers
+[License Type]
